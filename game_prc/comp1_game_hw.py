@@ -142,6 +142,7 @@ def reset_state() -> None:
     # 1) 플레이어 상태 초기화
     player.position = Vec3(0, 0, -10)
     player.hp = player.max_hp = 100
+    gun.enabled = True
 
     # 2) 라운드·탄약·재장전 상태 초기화
     current_round = 1
@@ -161,6 +162,7 @@ def reset_state() -> None:
     game_over_text.text = 'GAME OVER'
     pause_text.enabled       = False
     pause_restart_btn.enabled = False
+
 # 5) 라운드 시작
     start_round()
 
@@ -223,7 +225,7 @@ def shoot() -> None:
         volume=0.5, wave='noise',
         pitch=random.uniform(-13, -12), pitch_change=-12, speed=3
     )
-    active_sfx.append(sfx)           # ★ 등록
+    active_sfx.append(sfx)
 
     # 사운드가 끝나면 자동으로 리스트에서 제거
     invoke(lambda s=sfx: active_sfx.remove(s)
@@ -365,6 +367,7 @@ def check_round_clear() -> None:
         game_over_text.enabled = restart_button.enabled = True
         application.paused = True
         mouse.locked = False
+        stop_all_sfx() #사운드 제어
 
 # =============================================================
 # 9) 메인 update 루프
