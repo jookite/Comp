@@ -9,10 +9,12 @@ import random, time, math
 
 # ---------- 게임 전역 상수 ----------
 EPS             = 0.001        # 스케일이 0이 되는 일을 방지 (UI 막대 등)
-MAX_AMMO        = 10           # 한 번 장전 시 얻는 탄약 수
+MAX_AMMO        = 20           # 한 번 장전 시 얻는 탄약 수
 TOTAL_ROUNDS    = 5            # 총 라운드 수
-BASE_ENEMIES    = 8            # 1라운드 적 기본 수
-INC_PER_ROUND   = 4            # 라운드마다 늘어나는 적 수
+BASE_ENEMIES    = 5            # 1라운드 적 기본 수
+INC_PER_ROUND   = 2            # 라운드마다 늘어나는 적 수
+active_sfx = []                # 사운드 제어
+DELAY = 1                      # 리로딩 애니메이션,기능 딜레이 시간
 
 # =============================================================
 # 1) 기본 설정
@@ -22,6 +24,7 @@ random.seed(0)
 Entity.default_shader = lit_with_shadows_shader
 window.color = color.rgb(10, 10, 10)
 
+
 # =============================================================
 # 2) 월드 오브젝트 : 지면 · 플레이어 · 총기
 # =============================================================
@@ -30,7 +33,6 @@ ground = Entity(
     texture='grass', texture_scale=(4, 4)
 )
 
-editor_camera = EditorCamera(enabled=False, ignore_paused=True)
 
 # ---------- 플레이어 ----------
 player = FirstPersonController(
@@ -79,27 +81,53 @@ reload_bar = Entity(
 
 # 라운드 표시
 round_text = Text(
-    'Round 1 / 5', parent=ui_root, scale=1.5,
-    origin=(0, 0), position=(0, .45), color=color.yellow
+    'Round 1 / 5',
+    parent=ui_root,
+    scale=1.5,
+    origin=(0, 0),
+    position=(0, .45),
+    color=color.yellow
 )
 
 # 게임 오버 화면
 game_over_text = Text(
-    'GAME OVER', parent=ui_root, scale=3,
-    origin=(0, 0), enabled=False, color=color.red
+    'GAME OVER',
+    parent=ui_root,
+    scale=3,
+    origin=(0, 0),
+    enabled=False,
+    color=color.red
 )
 restart_button = Button(
-    text='Restart  (R)', parent=game_over_text,
-    color=color.azure, scale=.15, origin=(0, 0), y=-.1,
+    text='Restart  (R)',
+    parent=game_over_text,
+    color=color.azure,
+    scale=(.15, .05, 1),
+    origin=(0, 0),
+    position=(0, -0.04, 0),
     enabled=False
 )
 
-# 일시정지 패널
-pause_panel = WindowPanel(
-    title='PAUSED (Tab 재개)', content=(),
-    enabled=False, parent=ui_root, scale=.5
+# 일시정지 화면
+pause_text = Text(
+    'PAUSED',
+    parent=ui_root,
+    scale=3,
+    origin=(0, 0),
+    color=color.azure,
+    enabled=False
 )
 
+pause_restart_btn = Button(
+    text='Restart  (R)',
+    parent=pause_text,
+    color=color.gray,
+    scale=(.15, .05, 1),
+    origin=(0, 0),
+    position=(0, -.04, 0),
+    enabled=False,
+    on_click=lambda: reset_state()
+)
 # =============================================================
 # 4) 전역 상태 변수 및 초기화 함수
 # =============================================================
@@ -131,8 +159,9 @@ def reset_state() -> None:
     update_ammo_ui()
     game_over_text.enabled = restart_button.enabled = False
     game_over_text.text = 'GAME OVER'
-
-    # 5) 라운드 시작
+    pause_text.enabled       = False
+    pause_restart_btn.enabled = False
+# 5) 라운드 시작
     start_round()
 
     # 6) 게임 흐름 제어
@@ -163,9 +192,9 @@ def reload() -> None:
 
     reloading = True
     reload_bar.scale_x = EPS
-    reload_bar.animate_scale_x(.28, duration=2, curve=curve.linear)
+    reload_bar.animate_scale_x(.28, duration=DELAY, curve=curve.linear)
     ammo_text.text = 'Reloading…'
-    invoke(finish_reload, delay=2)   # 2초 뒤 재장전 완료
+    invoke(finish_reload, delay=DELAY)   # 2초 뒤 재장전 완료
 
 def finish_reload() -> None:
     """재장전 완료"""
@@ -173,6 +202,11 @@ def finish_reload() -> None:
     ammo, reloading = MAX_AMMO, False
     reload_bar.scale_x = EPS
     update_ammo_ui()
+
+def stop_all_sfx():
+    for s in active_sfx:
+        s.stop()
+    active_sfx.clear()
 
 def shoot() -> None:
     """마우스 왼쪽 버튼: 탄 발사"""
@@ -183,12 +217,18 @@ def shoot() -> None:
     # 발사 연출
     gun.on_cooldown = True
     gun.muzzle_flash.enabled = True
-    ursfx(
+    sfx = ursfx(
         # 단순 총소리 효과음
         [(0, 0), (0.1, 0.9), (0.15, 0.75), (0.3, 0.14), (0.6, 0)],
         volume=0.5, wave='noise',
         pitch=random.uniform(-13, -12), pitch_change=-12, speed=3
     )
+    active_sfx.append(sfx)           # ★ 등록
+
+    # 사운드가 끝나면 자동으로 리스트에서 제거
+    invoke(lambda s=sfx: active_sfx.remove(s)
+    if s in active_sfx else None,
+           delay=sfx.clip.length())
 
     # 탄약 소모 및 UI 반영
     ammo -= 1
@@ -348,21 +388,23 @@ def trigger_game_over() -> None:
     game_over_text.enabled = restart_button.enabled = True
     application.paused = True
     mouse.locked = False
+    stop_all_sfx()
 
 # =============================================================
 # 10) 입력 처리
 # =============================================================
 def handle_input(key):
-    # Tab : 에디터 카메라 토글 + 일시정지
-    if key == 'tab':
-        editor_camera.enabled = not editor_camera.enabled
-        application.paused    = editor_camera.enabled
-        player.visible_self   = editor_camera.enabled
-        gun.enabled           = not editor_camera.enabled
-        pause_panel.enabled   = editor_camera.enabled
-        mouse.locked          = not editor_camera.enabled
-        if editor_camera.enabled:
-            pause_panel.position = Vec2(0, 0)
+    if key == 'escape':
+        paused = not application.paused
+
+        application.paused = paused
+        mouse.locked = not paused
+
+        gun.enabled = not paused
+        player.visible_self = paused
+
+        pause_text.enabled = True
+        pause_restart_btn.enabled = True
 
     # R : 게임 오버/승리 화면에서 재시작
     if key == 'r' and application.paused:
